@@ -223,6 +223,9 @@ app.get('/me', async (c) => {
     .filter(s => s.scope === 'الجميع' || s.scope === u.category || (s.scope === 'المشرفون' && isSupervisor(u)));
   const quiz = db.prepare('SELECT * FROM daily_quiz WHERE date = ?').get(d);
   const myAnswer = quiz ? db.prepare('SELECT * FROM quiz_answers WHERE date = ? AND person_id = ?').get(d, u.id) : null;
+  // الإعلامية: ما لم يتفاعل معه بعد يظهر هنا — والمتفاعَل معه يبقى في /media
+  const { activePosts, engageOf, postCard } = require('./media');
+  const mediaTodo = activePosts().filter(p => { const e = engageOf(p.id, u.id); return !(e && e.acked_at); }).slice(0, 2);
   const myReqs = db.prepare('SELECT * FROM requests WHERE person_id = ? ORDER BY id DESC LIMIT 5').all(u.id);
   const coms = committeesOf(u.id);
   const myAtt = db.prepare(`SELECT date, slot, status FROM attendance WHERE person_id = ? ORDER BY date DESC, slot DESC LIMIT 6`).all(u.id);
@@ -300,6 +303,8 @@ app.get('/me', async (c) => {
           <button class="btn ghost block" style="margin:5px 0;text-align:right">${esc(o)}</button></form>`).join('')}
         <div style="font-size:11px;color:var(--muted)">لك محاولة واحدة فقط — اختر بتركيز</div></div>`;
     })() : ''}
+    ${mediaTodo.map(p => postCard(p, engageOf(p.id, u.id))).join('')}
+    ${mediaTodo.length ? '<p style="text-align:center;font-size:12.5px"><a href="/media">📣 كل منشورات الإعلامية ›</a></p>' : ''}
     <div class="card"><h3>✍️ فائدة اليوم</h3>
       ${mine ? `<div class="row" style="padding:8px;background:rgba(63,126,68,.06);border-radius:10px">
           <span style="font-size:20px">${mine.status === 'approved' ? '🌟' : '⏳'}</span>
@@ -1719,6 +1724,7 @@ app.post('/committee/tasks/:id/toggle', (c) => {
 });
 
 // ================= لوحة الإدارة =================
+app.route('/media', require('./media').media);
 app.route('/admin', adminRoutes);
 
 // نسخ احتياطي تلقائي — فحص كل ٦ ساعات، نسخة واحدة يومياً (المنطق في db.js)

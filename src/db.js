@@ -323,6 +323,27 @@ CREATE TABLE IF NOT EXISTS checklist_done (
   PRIMARY KEY (item_id, person_id, date)
 );
 
+-- الإعلامية: منشور له رابط، و«تفاعلت» لا تُفتح إلا لمن فتح الرابط فعلاً.
+-- الفتح يُسجَّل على الخادم عند المرور بمسار التحويل، فالقفل حكمٌ لا زينة.
+CREATE TABLE IF NOT EXISTS media_posts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  note TEXT,
+  points INTEGER NOT NULL DEFAULT 0,  -- نقاط التفاعل (٠ = بلا نقاط)
+  date TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER,
+  ts TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS media_engage (
+  post_id INTEGER NOT NULL REFERENCES media_posts(id) ON DELETE CASCADE,
+  person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+  opened_at TEXT,                   -- أول مرة فُتح فيها الرابط
+  acked_at TEXT,                    -- متى ضغط «تفاعلت»
+  PRIMARY KEY (post_id, person_id)
+);
+
 -- إقفال اليوم المالي: يوم الرحلة يبدأ بالفجر وينتهي بفجر الغد. فإذا دخل فجر
 -- الغد أُقفل اليوم **نهائياً** وحُفظت لقطة إجماليه هنا — لا يُفتح بعدها أبداً،
 -- فالدفتر المختوم هو ما تُبنى عليه المحاسبة ولا يصحّ أن يتغيّر بأثر رجعي.

@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "seed": "node src/seed.js",
-    "test": "bash tests/money.sh"
+    "test": "bash tests/run.sh"
   },
   "dependencies": {
     "@hono/node-server": "^1",

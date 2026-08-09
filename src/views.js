@@ -3,6 +3,15 @@ const { ROLE_NAMES, isManager, isSupervisor, committeesOf, circlesSupervisedBy, 
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+// رابط صالح للوضع في href أو للتحويل إليه: http/https فقط. ما عداهما (javascript:
+// وغيرها) يرجع فارغاً — فالروابط تُكتب من لوحة الإدارة وتُفتح في جهاز كل مشارك.
+const safeUrl = (s) => {
+  try {
+    const u = new URL(String(s ?? '').trim());
+    return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : '';
+  } catch { return ''; }
+};
+
 // الاسم المختصر في القوائم: الأول + الأخير — الأسماء الخماسية تكسر السطر على الجوال.
 // وإن تشابه مختصران أُضيف اسم الأب للتمييز، فلا يختلط طالبان أبداً.
 let _shortMap = null;
@@ -305,4 +314,4 @@ const rolePill = (role) => {
 const supBadge = (role) => role === 'room_supervisor' ? ' <span class="pill b">⭐ مشرف</span>' : role === 'admin' ? ' <span class="pill m">👑</span>' : '';
 const catPill = (cat) => `<span class="pill ${cat === 'شباب' ? 'g' : cat === 'ثانوي' ? 'o' : 'm'}">${esc(cat)}</span>`;
 
-module.exports = { layout, esc, rolePill, catPill, supBadge, shortName, buildShortNames };
+module.exports = { layout, esc, safeUrl, rolePill, catPill, supBadge, shortName, buildShortNames };
