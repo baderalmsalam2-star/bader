@@ -323,6 +323,18 @@ CREATE TABLE IF NOT EXISTS checklist_done (
   PRIMARY KEY (item_id, person_id, date)
 );
 
+-- جاهزية كل طالب: البنود الشخصية المتحققة له في يومه. الغرفة تُقاس بساكنيها،
+-- فبند الغرفة لا يُعدّ متحققاً حتى يتحقق عند كل ساكن فيها.
+CREATE TABLE IF NOT EXISTS person_ready (
+  person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  items TEXT NOT NULL,              -- JSON: أرقام البنود المتحققة
+  n INTEGER NOT NULL,               -- عددها
+  rated_by INTEGER,
+  ts TEXT NOT NULL,
+  PRIMARY KEY (person_id, date)
+);
+
 -- الإعلامية: منشور له رابط، و«تفاعلت» لا تُفتح إلا لمن فتح الرابط فعلاً.
 -- الفتح يُسجَّل على الخادم عند المرور بمسار التحويل، فالقفل حكمٌ لا زينة.
 CREATE TABLE IF NOT EXISTS media_posts (
@@ -428,19 +440,33 @@ CREATE TABLE IF NOT EXISTS audit (
   add('committee_tasks', 'weekday2', 'INTEGER');
   // دفتران منفصلان: المدينة ومكة. ما سُجّل قبل الفصل كان كلّه في المدينة.
   add('expenses', 'ledger', "TEXT NOT NULL DEFAULT 'المدينة'");
+
+  // نطاق بند الجاهزية: بند الغرفة يُعلَّم مرة واحدة (دورة المياه، الأرضية)،
+  // وبند الطالب يُعلَّم لكل ساكن على حدة (سريره، أغراضه). البنود القديمة كلها
+  // كانت تُعلَّم مرة واحدة للغرفة، فتبقى كذلك ولا يتغيّر معناها بأثر رجعي.
+  {
+    const cs = db.prepare('PRAGMA table_info(room_check_items)').all().map(x => x.name);
+    if (!cs.includes('scope')) {
+      db.exec("ALTER TABLE room_check_items ADD COLUMN scope TEXT NOT NULL DEFAULT 'room'");
+      // البنود الافتراضية التي هي بطبيعتها شخصية تُنقل لنطاق الطالب
+      const ins = db.prepare("UPDATE room_check_items SET scope = 'person' WHERE title = ?");
+      ['الأسرّة مرتّبة والأغطية مطويّة', 'الملابس والحقائب مرتّبة في مكانها'].forEach(t => ins.run(t));
+    }
+  }
   // «مرة في الموسم» أُلغيت بقرار الإدارة — تُرحَّل إلى «مرة واحدة»
   db.exec("UPDATE committee_tasks SET kind = 'once' WHERE kind = 'season'");
 }
 
 // بنود الجاهزية الافتراضية — معايير محسوسة يراها الجميع (قابلة للتعديل من لوحة الإدارة)
+// «طالب» = يُعلَّم لكل ساكن على حدة، و«غرفة» = يُعلَّم مرة واحدة للغرفة كلها
 if (db.prepare('SELECT COUNT(*) c FROM room_check_items').get().c === 0) {
-  const ins = db.prepare('INSERT INTO room_check_items (title, ord) VALUES (?, ?)');
-  ['الأسرّة مرتّبة والأغطية مطويّة',
-    'الأرضية نظيفة وخالية من النفايات',
-    'الملابس والحقائب مرتّبة في مكانها',
-    'دورة المياه نظيفة',
-    'لا بقايا طعام أو أكواب مكشوفة',
-  ].forEach((t, i) => ins.run(t, i));
+  const ins = db.prepare('INSERT INTO room_check_items (title, ord, scope) VALUES (?, ?, ?)');
+  [['سريره مرتّب وغطاؤه مطويّ', 'person'],
+    ['ملابسه وحقيبته مرتّبة في مكانها', 'person'],
+    ['الأرضية نظيفة وخالية من النفايات', 'room'],
+    ['دورة المياه نظيفة', 'room'],
+    ['لا بقايا طعام أو أكواب مكشوفة', 'room'],
+  ].forEach(([t, s], i) => ins.run(t, i, s));
 }
 
 // بنود المصروفات الافتراضية (حسب اعتماد الإدارة) — تُضاف مرة واحدة وتبقى قابلة للتعديل

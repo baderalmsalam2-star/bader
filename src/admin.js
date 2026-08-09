@@ -1230,24 +1230,38 @@ admin.get('/checkitems', (c) => {
     <div class="card" style="font-size:12.5px;color:var(--muted)">
       يمرّ المقيّم على هذه البنود في جولته ويعلّم المتحقق منها. <b style="color:var(--ink)">الدرجة = عدد البنود المتحققة</b>،
       وكل بند = <b style="color:var(--ink)">${rules.cleanliness_star}</b> نقطة (تُعدَّل من «قواعد النقاط»).
-      فيصير التقييم على معايير محسوسة يراها الجميع، لا على تقدير شخصي.</div>
+      فيصير التقييم على معايير محسوسة يراها الجميع، لا على تقدير شخصي.<br><br>
+      <b style="color:var(--ink)">نطاق البند:</b> «الغرفة» يُعلَّم مرة واحدة للغرفة كلها (دورة المياه، الأرضية)،
+      و«الطالب» يُعلَّم لكل ساكن على حدة (سريره، أغراضه). وبند الطالب لا يُحتسب للغرفة
+      حتى يتحقق عند كل ساكن فيها.</div>
     <div class="card"><h3>➕ بند جديد</h3>
       <form method="post" action="/admin/checkitems/add" class="row">
         <input name="title" placeholder="مثال: النوافذ مغلقة والمكيّف مضبوط" required class="grow">
+        <select name="scope" style="width:110px"><option value="room">🏠 الغرفة</option><option value="person">🛏 الطالب</option></select>
         <button class="btn sm">إضافة</button></form></div>
     <div class="card">${items.map(it => `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--line)">
       <div class="grow" style="font-size:13.5px;${it.active ? '' : 'opacity:.45;text-decoration:line-through'}">${esc(it.title)}</div>
+      <form method="post" action="/admin/checkitems/${it.id}/scope">
+        <button class="btn sm ghost" title="تبديل النطاق">${it.scope === 'person' ? '🛏 الطالب' : '🏠 الغرفة'}</button></form>
       <form method="post" action="/admin/checkitems/${it.id}/toggle"><button class="btn sm ghost">${it.active ? 'تعطيل' : 'تفعيل'}</button></form>
       <form method="post" action="/admin/checkitems/${it.id}/delete" onsubmit="return confirm('حذف البند نهائياً؟')"><button class="btn sm ghost">🗑</button></form>
     </div>`).join('')}
-    <div style="font-size:12px;color:var(--muted);margin-top:8px">البنود المفعّلة: <b>${items.filter(i => i.active).length}</b> — وهي الدرجة الكاملة للغرفة</div></div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">البنود المفعّلة: <b>${items.filter(i => i.active).length}</b> — وهي الدرجة الكاملة للغرفة
+      (منها <b>${items.filter(i => i.active && i.scope === 'person').length}</b> لكل طالب)</div></div>
   `, { user: u, active: '/admin' }));
 });
 admin.post('/checkitems/add', async (c) => {
   const b = await c.req.parseBody();
   const mx = db.prepare('SELECT COALESCE(MAX(ord),0) m FROM room_check_items').get().m;
-  db.prepare('INSERT INTO room_check_items (title, ord) VALUES (?, ?)').run(String(b.title).trim(), mx + 1);
-  audit(c.get('user').id, 'checkitem_add', String(b.title));
+  const scope = b.scope === 'person' ? 'person' : 'room';
+  db.prepare('INSERT INTO room_check_items (title, ord, scope) VALUES (?, ?, ?)').run(String(b.title).trim(), mx + 1, scope);
+  audit(c.get('user').id, 'checkitem_add', `${b.title} (${scope === 'person' ? 'الطالب' : 'الغرفة'})`);
+  return back(c, '/admin/checkitems');
+});
+admin.post('/checkitems/:id/scope', (c) => {
+  const id = Number(c.req.param('id'));
+  db.prepare("UPDATE room_check_items SET scope = CASE scope WHEN 'person' THEN 'room' ELSE 'person' END WHERE id = ?").run(id);
+  audit(c.get('user').id, 'checkitem_scope', `#${id}`);
   return back(c, '/admin/checkitems');
 });
 admin.post('/checkitems/:id/toggle', (c) => {

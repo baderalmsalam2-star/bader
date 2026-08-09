@@ -1128,11 +1128,16 @@ app.get('/room', (c) => {
   const rated = db.prepare('SELECT * FROM room_ratings WHERE room_id = ? AND date = ?').get(room.id, d);
   const rules = getRules();
   const checkItems = db.prepare('SELECT * FROM room_check_items WHERE active = 1 ORDER BY ord, id').all();
+  const roomItems = checkItems.filter(i => i.scope !== 'person');
+  const personItems = checkItems.filter(i => i.scope === 'person');
   const checkedIds = rated?.items ? JSON.parse(rated.items) : [];
-  // تقييم مكان كل ساكن — الافتراض أن الجميع مرتّبون، ولا يُضغط إلا على المُخِلّ
-  const placeRows = db.prepare('SELECT person_id, ok FROM place_ratings WHERE date = ? AND person_id IN (SELECT id FROM people WHERE room_id = ?)').all(d, room.id);
-  const savedBefore = placeRows.length > 0;
-  const untidy = new Set(placeRows.filter(r => !r.ok).map(r => r.person_id));
+  // جاهزية كل ساكن: بنوده الشخصية المتحققة له اليوم
+  const readyRows = db.prepare(`SELECT person_id, items FROM person_ready
+    WHERE date = ? AND person_id IN (SELECT id FROM people WHERE room_id = ?)`).all(d, room.id);
+  const savedBefore = readyRows.length > 0;
+  const readyOf = new Map(readyRows.map(r => [r.person_id, new Set(JSON.parse(r.items))]));
+  const metBy = (pid, itemId) => readyOf.get(pid)?.has(itemId) ?? false;
+  const readyCount = members.filter(m => personItems.every(it => metBy(m.id, it.id))).length;
   const flash = c.req.query('m');
   return c.html(layout('جولة تقييم الغرف', `
     ${flash ? `<div class="flash">${esc(flash)}</div>` : ''}
@@ -1141,30 +1146,45 @@ app.get('/room', (c) => {
       <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">علّم البنود المتحققة فقط — الدرجة تُحسب تلقائياً</div>
       <form method="post" action="/room/rate">
         <input type="hidden" name="room_id" value="${room.id}">
-        ${checkItems.map(it => `<label class="row" style="padding:11px 12px;margin:5px 0;background:#fff;border:2px solid var(--line);border-radius:12px;cursor:pointer" class="ckrow">
+
+        <button name="allready" value="1" class="btn block gold" style="margin-bottom:12px;font-size:16px;padding:14px"
+          onclick="return confirm('تعليم كل البنود لكل السكان — متأكد؟')">🎉 الجميع جاهزون</button>
+        <div style="font-size:11.5px;color:var(--muted);text-align:center;margin:-8px 0 12px">
+          زرٌّ واحد حين تكون الغرفة كاملة الجاهزية — وإلا فعلّم بالتفصيل أدناه</div>
+
+        ${roomItems.length ? `<div style="font-size:12.5px;font-weight:700;margin:6px 0">🏠 بنود الغرفة</div>
+        ${roomItems.map(it => `<label class="row ckrow" style="padding:11px 12px;margin:5px 0;background:#fff;border:2px solid var(--line);border-radius:12px;cursor:pointer">
           <input type="checkbox" name="items" value="${it.id}" ${checkedIds.includes(it.id) ? 'checked' : ''} style="width:22px;height:22px;flex:none;accent-color:var(--green)">
           <div class="grow" style="font-size:14px;font-weight:600">${esc(it.title)}</div>
-        </label>`).join('')}
-        <div class="row" style="margin-top:10px;align-items:center">
-          <div class="grow" style="font-size:13px">الدرجة: <b id="scoreTxt" style="font-size:18px;color:var(--green)">${checkedIds.length}</b> من ${checkItems.length}
+        </label>`).join('')}` : ''}
+
+        ${personItems.length ? `<div style="margin-top:14px;padding-top:12px;border-top:2px solid var(--line)">
+          <h3 style="margin:0 0 2px">🛏 بنود كل طالب</h3>
+          <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">
+            لكل ساكن بنوده — والغرفة لا تُحتسب على بندٍ حتى يتحقق عند الجميع</div>
+          ${members.length ? members.map(m => {
+      const mine = personItems.filter(it => metBy(m.id, it.id)).length;
+      return `<div class="pcard" data-id="${m.id}" style="padding:10px 12px;margin:6px 0;border:2px solid var(--line);border-radius:12px">
+            <div class="row" style="align-items:center">
+              <div class="grow" style="font-size:14px;font-weight:700">${esc(shortName(m))}${supBadge(m.role)}</div>
+              <span class="pst pill ${mine === personItems.length ? 'g' : 'r'}">${mine}/${personItems.length}</span>
+            </div>
+            <div style="margin-top:6px">
+              ${personItems.map(it => `<label class="row" style="padding:7px 4px;cursor:pointer">
+                <input type="checkbox" name="p${m.id}" value="${it.id}" ${metBy(m.id, it.id) ? 'checked' : ''}
+                  style="width:20px;height:20px;flex:none;accent-color:var(--green)">
+                <div class="grow" style="font-size:13px">${esc(it.title)}</div></label>`).join('')}
+            </div></div>`;
+    }).join('') : '<div style="color:var(--muted);font-size:13px">لا سكان في هذه الغرفة</div>'}
+          <div style="font-size:12px;color:var(--muted);margin-top:4px">
+            <b id="readyN">${readyCount}</b> من ${members.length} جاهز تماماً</div>
+        </div>` : ''}
+
+        <div class="row" style="margin-top:12px;align-items:center">
+          <div class="grow" style="font-size:13px">درجة الغرفة: <b id="scoreTxt" style="font-size:18px;color:var(--green)">${checkedIds.length}</b> من ${checkItems.length}
             <span style="color:var(--muted)">(<span id="ptsTxt">${checkedIds.length * rules.cleanliness_star}</span> نقطة)</span></div>
         </div>
         <label>ملاحظة (اختياري)</label><input name="note" value="${esc(rated?.note || '')}" placeholder="مثال: الدولاب يحتاج ترتيباً">
-
-        <div style="margin-top:14px;padding-top:12px;border-top:2px solid var(--line)">
-          <h3 style="margin:0 0 2px">🛏 مكان كل ساكن</h3>
-          <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">
-            الجميع مرتّبون افتراضياً — اضغط على من لم يرتّب سريره وأغراضه فقط</div>
-          ${members.map(m => `<div class="plrow ${untidy.has(m.id) ? 'bad' : ''}" data-id="${m.id}"
-            style="padding:10px 12px;margin:5px 0;border:2px solid var(--line);border-radius:12px;display:flex;gap:8px;align-items:center;cursor:pointer;user-select:none">
-            <span class="plic" style="font-size:19px">${untidy.has(m.id) ? '⚠️' : '✅'}</span>
-            <div class="grow" style="font-size:14px;font-weight:600">${esc(shortName(m))}${supBadge(m.role)}</div>
-            <span class="plst pill ${untidy.has(m.id) ? 'r' : 'g'}">${untidy.has(m.id) ? 'غير مرتّب' : 'مرتّب'}</span>
-          </div>`).join('')}
-          <input type="hidden" name="untidy" id="untidyIn" value="${[...untidy].join(',')}">
-          <div style="font-size:12px;color:var(--muted);margin-top:4px">
-            <b id="tidyN">${members.length - untidy.size}</b> من ${members.length} مرتّب</div>
-        </div>
 
         <button class="btn block" style="margin-top:12px">${rated || savedBefore ? 'تحديث تقييم اليوم' : 'حفظ التقييم'}</button>
       </form>
@@ -1192,28 +1212,31 @@ app.get('/room', (c) => {
       })()}
     </div>
     <script>
-    // الدرجة تُحسب من البنود المتحققة — لا تقدير شخصي
+    // الدرجة تُحسب من البنود المتحققة — لا تقدير شخصي.
+    // وبند الطالب لا يُحتسب للغرفة حتى يتحقق عند كل ساكن — كما يحسبها الخادم تماماً.
     const PT=${rules.cleanliness_star};
-    const boxes=[...document.querySelectorAll('input[name=items]')];
-    function recalc(){const n=boxes.filter(b=>b.checked).length;
+    const PITEMS=${JSON.stringify(personItems.map(i => i.id))};
+    const roomBoxes=[...document.querySelectorAll('input[name=items]')];
+    const pcards=[...document.querySelectorAll('.pcard')];
+    function recalc(){
+      let n=roomBoxes.filter(b=>b.checked).length;
+      if(pcards.length) n+=PITEMS.filter(id=>pcards.every(card=>
+        card.querySelector('input[value="'+id+'"]')?.checked)).length;
       scoreTxt.textContent=n;ptsTxt.textContent=n*PT;
-      boxes.forEach(b=>{b.closest('label').style.borderColor=b.checked?'var(--green)':'var(--line)';
-        b.closest('label').style.background=b.checked?'rgba(63,126,68,.06)':'#fff';});}
-    boxes.forEach(b=>b.onchange=recalc);recalc();
-    // مكان الساكن: ضغطة واحدة تقلب الحالة — لا قوائم ولا نجوم
-    const plrows=[...document.querySelectorAll('.plrow')];
-    function plsync(){
-      const bad=plrows.filter(r=>r.classList.contains('bad'));
-      untidyIn.value=bad.map(r=>r.dataset.id).join(',');
-      tidyN.textContent=plrows.length-bad.length;
-      plrows.forEach(r=>{const b=r.classList.contains('bad');
-        r.style.borderColor=b?'#c0392b':'var(--green)';
-        r.style.background=b?'rgba(192,57,43,.07)':'rgba(63,126,68,.05)';
-        r.querySelector('.plic').textContent=b?'⚠️':'✅';
-        const s=r.querySelector('.plst');s.className='plst pill '+(b?'r':'g');s.textContent=b?'غير مرتّب':'مرتّب';});
+      roomBoxes.forEach(b=>{b.closest('label').style.borderColor=b.checked?'var(--green)':'var(--line)';
+        b.closest('label').style.background=b.checked?'rgba(63,126,68,.06)':'#fff';});
+      let full=0;
+      pcards.forEach(card=>{
+        const bs=[...card.querySelectorAll('input[type=checkbox]')];
+        const done=bs.filter(b=>b.checked).length, all=done===bs.length&&bs.length>0;
+        if(all)full++;
+        card.style.borderColor=all?'var(--green)':'var(--line)';
+        card.style.background=all?'rgba(63,126,68,.05)':'#fff';
+        const s=card.querySelector('.pst');s.className='pst pill '+(all?'g':'r');s.textContent=done+'/'+bs.length;});
+      const rn=document.getElementById('readyN');if(rn)rn.textContent=full;
     }
-    plrows.forEach(r=>r.onclick=()=>{r.classList.toggle('bad');plsync();});
-    plsync();
+    [...roomBoxes,...document.querySelectorAll('.pcard input[type=checkbox]')].forEach(b=>b.onchange=recalc);
+    recalc();
     </script>
   `, { user: u, active: '/room' }));
 });
@@ -1222,34 +1245,58 @@ app.post('/room/rate', async (c) => {
   const u = c.get('user');
   if (!canRateRooms(u)) return deny(c);
   const b = await c.req.parseBody({ all: true });
-  // الدرجة = عدد البنود المتحققة (لا تقدير شخصي)
-  const valid = new Set(db.prepare('SELECT id FROM room_check_items WHERE active = 1').all().map(r => r.id));
-  const ids = (Array.isArray(b.items) ? b.items : b.items ? [b.items] : []).map(Number).filter(x => valid.has(x));
-  const stars = ids.length;
+  const roomId = Number(b.room_id);
   const d = today();
-  db.prepare(`INSERT INTO room_ratings (room_id, date, stars, note, rated_by, items) VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(room_id, date) DO UPDATE SET stars = excluded.stars, note = excluded.note, rated_by = excluded.rated_by, items = excluded.items`)
-    .run(Number(b.room_id), d, stars, String(b.note || ''), u.id, JSON.stringify(ids));
-  // نقاط الغرفة من الجاهزية (تُستبدل عند تحديث التقييم)
   const rules = getRules();
-  db.prepare(`DELETE FROM points WHERE room_id = ? AND source = 'cleanliness' AND date = ?`).run(Number(b.room_id), d);
-  db.prepare(`INSERT INTO points (room_id, source, value, note, date, added_by, ts) VALUES (?, 'cleanliness', ?, ?, ?, ?, ?)`)
-    .run(Number(b.room_id), stars * rules.cleanliness_star, `جاهزية ${stars}/${valid.size}`, d, u.id, now());
-  // تقييم أماكن السكان — الافتراض «مرتّب»، والمرسَل هم المُخِلّون فقط
-  const bad = new Set(String(b.untidy || '').split(',').map(Number).filter(Boolean));
-  const mem = db.prepare('SELECT id FROM people WHERE room_id = ? AND active = 1').all(Number(b.room_id));
+  const items = db.prepare('SELECT id, scope FROM room_check_items WHERE active = 1').all();
+  const roomIds = items.filter(i => i.scope !== 'person').map(i => i.id);
+  const personIds = items.filter(i => i.scope === 'person').map(i => i.id);
+  const mem = db.prepare('SELECT id FROM people WHERE room_id = ? AND active = 1').all(roomId);
+  // «الجميع جاهزون»: كل البنود متحققة للغرفة ولكل ساكن — بضغطة واحدة
+  const all = b.allready === '1';
+  const arr = (v) => (Array.isArray(v) ? v : v ? [v] : []).map(Number);
+
+  // بنود الغرفة كما أُرسلت
+  const roomMet = all ? roomIds : arr(b.items).filter(x => roomIds.includes(x));
+
+  // بنود كل طالب — تُحفظ له وحده
+  const insReady = db.prepare(`INSERT INTO person_ready (person_id, date, items, n, rated_by, ts) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(person_id, date) DO UPDATE SET items = excluded.items, n = excluded.n, rated_by = excluded.rated_by, ts = excluded.ts`);
   const insPlace = db.prepare(`INSERT INTO place_ratings (person_id, date, ok, rated_by, ts) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(person_id, date) DO UPDATE SET ok = excluded.ok, rated_by = excluded.rated_by, ts = excluded.ts`);
   const delPt = db.prepare("DELETE FROM points WHERE person_id = ? AND source = 'place' AND date = ?");
   const insPt = db.prepare("INSERT INTO points (person_id, source, value, note, date, added_by, ts) VALUES (?, 'place', ?, ?, ?, ?, ?)");
+  const metOf = new Map();
+  let ready = 0;
   for (const m of mem) {
-    const ok = bad.has(m.id) ? 0 : 1;
+    const met = all ? personIds : arr(b['p' + m.id]).filter(x => personIds.includes(x));
+    metOf.set(m.id, new Set(met));
+    insReady.run(m.id, d, JSON.stringify(met), met.length, u.id, now());
+    // بلا بنود شخصية لا حكم على الطالب: لا يُسجَّل له جاهزٌ ولا غيرُ جاهز،
+    // فالحكم بلا معيار افتراءٌ عليه.
+    if (!personIds.length) continue;
+    // الطالب «جاهز» متى تحققت بنوده كلها — ونقطة المكان تتبع ذلك
+    const ok = met.length === personIds.length ? 1 : 0;
+    if (ok) ready++;
     insPlace.run(m.id, d, ok, u.id, now());
     delPt.run(m.id, d);
-    if (ok) insPt.run(m.id, rules.place_point ?? 2, 'مكانه مرتّب', d, u.id, now());
+    if (ok) insPt.run(m.id, rules.place_point ?? 2, 'جاهز — كل بنوده متحققة', d, u.id, now());
   }
-  audit(u.id, 'room_rate', `غرفة ${b.room_id}: ${stars}/${valid.size} بنداً · ${mem.length - bad.size}/${mem.length} مكاناً مرتّباً`);
-  return c.redirect('/room?r=' + b.room_id);
+
+  // الغرفة تُقاس بساكنيها: بند الطالب لا يُحتسب لها حتى يتحقق عند كل ساكن
+  const sharedMet = mem.length ? personIds.filter(id => mem.every(m => metOf.get(m.id).has(id))) : [];
+  const ids = [...roomMet, ...sharedMet];
+  const stars = ids.length;
+  db.prepare(`INSERT INTO room_ratings (room_id, date, stars, note, rated_by, items) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(room_id, date) DO UPDATE SET stars = excluded.stars, note = excluded.note, rated_by = excluded.rated_by, items = excluded.items`)
+    .run(roomId, d, stars, String(b.note || ''), u.id, JSON.stringify(ids));
+  db.prepare(`DELETE FROM points WHERE room_id = ? AND source = 'cleanliness' AND date = ?`).run(roomId, d);
+  db.prepare(`INSERT INTO points (room_id, source, value, note, date, added_by, ts) VALUES (?, 'cleanliness', ?, ?, ?, ?, ?)`)
+    .run(roomId, stars * rules.cleanliness_star, `جاهزية ${stars}/${items.length}`, d, u.id, now());
+
+  audit(u.id, 'room_rate', `غرفة ${roomId}: ${stars}/${items.length} بنداً · ${ready}/${mem.length} طالباً جاهزاً${all ? ' (الجميع جاهزون)' : ''}`);
+  return c.redirect(`/room?r=${roomId}&m=` + encodeURIComponent(
+    all ? `🎉 سُجّل: الجميع جاهزون — ${stars}/${items.length}` : `حُفظ — ${ready}/${mem.length} طالباً جاهزاً`));
 });
 
 app.post('/room/behavior', async (c) => {
