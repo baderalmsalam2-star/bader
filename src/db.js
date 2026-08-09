@@ -3,7 +3,9 @@ const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+// مجلد البيانات — يُحوَّل بـ RIHLA_DATA لتشغيل الاختبارات على قاعدة معزولة،
+// فلا يقترب اختبارٌ من قاعدة الرحلة الحقيقية أبداً
+const DATA_DIR = process.env.RIHLA_DATA || path.join(__dirname, '..', 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const db = new DatabaseSync(path.join(DATA_DIR, 'rihla.db'));
 
@@ -321,6 +323,19 @@ CREATE TABLE IF NOT EXISTS checklist_done (
   PRIMARY KEY (item_id, person_id, date)
 );
 
+-- إقفال اليوم المالي: يوم الرحلة يبدأ بالفجر وينتهي بفجر الغد. فإذا دخل فجر
+-- الغد أُقفل اليوم **نهائياً** وحُفظت لقطة إجماليه هنا — لا يُفتح بعدها أبداً،
+-- فالدفتر المختوم هو ما تُبنى عليه المحاسبة ولا يصحّ أن يتغيّر بأثر رجعي.
+CREATE TABLE IF NOT EXISTS money_day_close (
+  date TEXT NOT NULL,
+  ledger TEXT NOT NULL,             -- المدينة / مكة
+  closed_at TEXT NOT NULL,          -- لحظة ختم الإقفال فعلياً
+  fajr TEXT NOT NULL,               -- وقت الفجر الذي أُقفل به اليوم
+  total_kwd REAL NOT NULL,          -- لقطة الإجمالي لحظة الختم
+  n INTEGER NOT NULL,               -- عدد العمليات لحظة الختم
+  PRIMARY KEY (date, ledger)
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
@@ -390,6 +405,8 @@ CREATE TABLE IF NOT EXISTS audit (
   add('checklist_items', 'weekday2', 'INTEGER');
   add('committee_tasks', 'weekday', 'INTEGER');
   add('committee_tasks', 'weekday2', 'INTEGER');
+  // دفتران منفصلان: المدينة ومكة. ما سُجّل قبل الفصل كان كلّه في المدينة.
+  add('expenses', 'ledger', "TEXT NOT NULL DEFAULT 'المدينة'");
   // «مرة في الموسم» أُلغيت بقرار الإدارة — تُرحَّل إلى «مرة واحدة»
   db.exec("UPDATE committee_tasks SET kind = 'once' WHERE kind = 'season'");
 }

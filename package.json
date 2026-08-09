@@ -6,7 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/server.js",
-    "seed": "node src/seed.js"
+    "seed": "node src/seed.js",
+    "test": "bash tests/money.sh"
   },
   "dependencies": {
     "@hono/node-server": "^1",

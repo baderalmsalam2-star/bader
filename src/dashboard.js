@@ -107,6 +107,8 @@ function stats() {
     done: q("SELECT COUNT(*) c FROM requests WHERE status='done'").c,
   };
   const money = q('SELECT COALESCE(SUM(amount_kwd),0) v, COUNT(*) n FROM expenses');
+  // الدفتران منفصلان — والمجموع وحده يخفي أين ذهب المال
+  const byLedger = all('SELECT ledger, COALESCE(SUM(amount_kwd),0) v FROM expenses GROUP BY ledger ORDER BY v DESC');
   const quiz = q('SELECT COUNT(*) n, SUM(correct) c FROM quiz_answers WHERE date=?', d);
   const topPoints = all(`SELECT p.name, SUM(pt.value) v FROM people p JOIN points pt ON pt.person_id=p.id
     WHERE p.active=1 GROUP BY p.id ORDER BY v DESC LIMIT 5`);
@@ -150,7 +152,7 @@ function stats() {
 
   const totalItems = q('SELECT COUNT(*) c FROM room_check_items WHERE active=1').c;
 
-  return { d, people, devices, uniqueLogins, neverLoggedIn, attToday, presentNow, rooms, ratedToday, committees, busNow, requests, money, quiz, topPoints, lastBackup,
+  return { d, people, devices, uniqueLogins, neverLoggedIn, attToday, presentNow, rooms, ratedToday, committees, busNow, requests, money, byLedger, quiz, topPoints, lastBackup,
     trend, bestAttend, worstAttend, pointsBySource, totalPoints, roomRank, expByGroup, supervisorActivity, weakRooms, totalItems };
 }
 
@@ -310,6 +312,14 @@ function render(c, u) {
         <b class="num">${r.score}</b></div>`).join('')}
       ${s.weakRooms.length ? `<div style="margin-top:10px;font-size:12.5px;color:var(--muted)">
         الأدنى جاهزية: ${s.weakRooms.map(r => `<span class="pill o">${esc(r.name)} ${Number(r.avg).toFixed(1)}</span>`).join(' ')}</div>` : ''}
+    </div>` : ''}
+
+    ${s.byLedger.length ? `<h2 class="sec">💰 الدفتران</h2>
+    <div class="card">
+      ${s.byLedger.map(x => `<div class="row" style="padding:5px 0;border-bottom:1px solid var(--line)">
+        <div class="grow">دفتر ${esc(x.ledger)}</div>
+        <b class="num">${Number(x.v).toLocaleString('ar-KW', { maximumFractionDigits: 0 })} د.ك</b>
+        <span class="pill ${x.ledger === 'مكة' ? 'm' : 'g'} num">${pct(x.v, s.money.v)}٪</span></div>`).join('')}
     </div>` : ''}
 
     ${s.expByGroup.length ? `<h2 class="sec">💰 المصروفات حسب المجموعة</h2>
